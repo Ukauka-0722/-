@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ポケモンチャンピオンズ 構築＆実数値・相性チェッカー</title>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --border-color: #334155;
+      --accent-color: #38bdf8;
+      --text-color: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      margin: 0; padding: 16px;
+    }
+    h1 { font-size: 1.3rem; margin: 0 0 16px 0; color: var(--accent-color); text-align: center; }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    @media (min-width: 1024px) { .layout { grid-template-columns: 1.2fr 0.8fr; } }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .card-title {
+      font-size: 0.95rem; font-weight: bold; color: var(--accent-color);
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 6px; margin-bottom: 10px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    select, input {
+      background: #0f172a; border: 1px solid var(--border-color);
+      color: #fff; padding: 6px; border-radius: 4px; font-size: 0.85rem; width: 100%;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+    .stat-table {
+      width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 8px; text-align: center;
+    }
+    .stat-table th, .stat-table td { padding: 4px 2px; border: 1px solid var(--border-color); }
+    .stat-table th { background: #0f172a; color: var(--text-muted); }
+    .stat-val { font-weight: bold; color: var(--accent-color); font-size: 0.9rem; }
+    .ev-total { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; text-align: right; }
+    .ev-over { color: #fca5a5; font-weight: bold; }
+    .matrix-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: center; }
+    .matrix-table th, .matrix-table td { padding: 4px; border: 1px solid var(--border-color); }
+    .matrix-table th { background: #0f172a; }
+    .eff-4x { background: #991b1b; color: #fca5a5; font-weight: bold; }
+    .eff-2x { background: #7f1d1d; color: #fca5a5; font-weight: bold; }
+    .eff-05x { background: #14532d; color: #86efac; }
+    .eff-025x { background: #14532d; color: #4ade80; font-weight: bold; }
+    .eff-0x { background: #334155; color: #94a3b8; }
+  </style>
+</head>
+<body>
+
+<h1>Pokémon Champions パーティ構築・実数値＆一貫性チェッカー</h1>
+
+<div class="layout">
+  <div><div id="party-slots"></div></div>
+  <div>
+    <div class="card" style="position: sticky; top: 16px;">
+      <div class="card-title">チームタイプ弱点・耐性一貫性 (全18タイプ)</div>
+      <table class="matrix-table">
+        <thead><tr id="matrix-head"><th>攻撃タイプ</th></tr></thead>
+        <tbody id="matrix-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// チャンピオンズ実装の持ち物リスト（一部抜粋・追加可能）
+const CHAMPIONS_ITEMS = [
+  "なし", "きあいのタスキ", "たべのこし", "いのちのたま", "たつじんのおび", 
+  "ちからのハチマキ", "ものしりメガネ", "こうかくレンズ", "ひかりのこな",
+  "ひかりのねんど", "メンタルハーブ", "かいがらのすず", "オボンのみ", "ラムのみ",
+  "リザードナイトX", "リザードナイトY", "ガブリアナイト", "ガルーラナイト", "ゲンガーナイト"
+];
+
+// ポケモンデータ
+const POKEMON_DB = {
+  "なし": { types: [], bs: [0,0,0,0,0,0], megas: {} },
+  "リザードン": {
+    types: ["炎", "飛行"], bs: [78, 84, 78, 109, 85, 100],
+    megas: {
+      "メガリザードンX": { types: ["炎", "ドラゴン"], bs: [78, 130, 111, 130, 85, 100] },
+      "メガリザードンY": { types: ["炎", "飛行"], bs: [78, 104, 78, 159, 115, 100] }
+    }
+  },
+  "ガブリアス": {
+    types: ["ドラゴン", "地面"], bs: [108, 130, 95, 80, 85, 102],
+    megas: { "メガガブリアス": { types: ["ドラゴン", "地面"], bs: [108, 170, 115, 120, 95, 92] } }
+  },
+  "ハバタクカミ": { types: ["ゴースト", "フェアリー"], bs: [55, 55, 55, 135, 135, 135], megas: {} },
+  "ガルーラ": {
+    types: ["ノーマル"], bs: [105, 95, 80, 40, 80, 90],
+    megas: { "メガガルーラ": { types: ["ノーマル"], bs: [105, 125, 100, 60, 100, 100] } }
+  },
+  "ゲンガー": {
+    types: ["ゴースト", "毒"], bs: [60, 65, 60, 130, 75, 110],
+    megas: { "メガゲンガー": { types: ["ゴースト", "毒"], bs: [60, 65, 80, 170, 95, 130] } }
+  }
+};
+
+const TYPES = ["ノーマル", "炎", "水", "電気", "草", "氷", "格闘", "毒", "地面", "飛行", "エスパー", "虫", "岩", "ゴースト", "ドラゴン", "悪", "鋼", "フェアリー"];
+const TYPE_CHART = {
+  "炎": { "草": 2, "氷": 2, "虫": 2, "鋼": 2, "炎": 0.5, "水": 0.5, "岩": 0.5, "ドラゴン": 0.5 },
+  "水": { "炎": 2, "地面": 2, "岩": 2, "水": 0.5, "草": 0.5, "ドラゴン": 0.5 },
+  "電気": { "水": 2, "飛行": 2, "電気": 0.5, "草": 0.5, "ドラゴン": 0.5, "地面": 0 },
+  "草": { "水": 2, "地面": 2, "岩": 2, "炎": 0.5, "草": 0.5, "毒": 0.5, "飛行": 0.5, "虫": 0.5, "ドラゴン": 0.5, "鋼": 0.5 },
+  "氷": { "草": 2, "地面": 2, "飛行": 2, "ドラゴン": 2, "炎": 0.5, "水": 0.5, "氷": 0.5, "鋼": 0.5 },
+  "格闘": { "ノーマル": 2, "氷": 2, "岩": 2, "悪": 2, "鋼": 2, "毒": 0.5, "飛行": 0.5, "エスパー": 0.5, "虫": 0.5, "フェアリー": 0.5, "ゴースト": 0 },
+  "地面": { "炎": 2, "電気": 2, "毒": 2, "岩": 2, "鋼": 2, "草": 0.5, "虫": 0.5, "飛行": 0 },
+  "ドラゴン": { "ドラゴン": 2, "鋼": 0.5, "フェアリー": 0 },
+  "ゴースト": { "エスパー": 2, "ゴースト": 2, "悪": 0.5, "ノーマル": 0 },
+  "フェアリー": { "格闘": 2, "ドラゴン": 2, "悪": 2, "炎": 0.5, "毒": 0.5, "鋼": 0.5 }
+};
+
+const NATURES = {
+  "いじっぱり (A↑C↓)": [1.0, 1.1, 1.0, 0.9, 1.0, 1.0],
+  "ようき (S↑C↓)":     [1.0, 1.0, 1.0, 0.9, 1.0, 1.1],
+  "ひかえめ (C↑A↓)":   [1.0, 0.9, 1.0, 1.1, 1.0, 1.0],
+  "おくびょう (S↑A↓)": [1.0, 0.9, 1.0, 1.0, 1.0, 1.1],
+  "わんぱく (B↑C↓)":   [1.0, 1.0, 1.1, 0.9, 1.0, 1.0],
+  "しんちょう (D↑C↓)": [1.0, 1.0, 1.0, 0.9, 1.1, 1.0],
+  "てんねん (補正なし)": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+};
+
+let party = Array(6).fill(null).map(() => ({
+  name: "なし", activeForm: "通常", item: "なし", ability: "",
+  moves: ["", "", "", ""], nature: "てんねん (補正なし)", evs: [0, 0, 0, 0, 0, 0]
+}));
+
+// チャンピオンズ用ステータス計算（種族値 + 5 + 努力値 × 性格補正）
+function calcStat(bs, ev, isHP, natureMult) {
+  if (bs === 0) return 0;
+  if (isHP) return bs + 5 + ev;
+  return Math.floor((bs + 5 + ev) * natureMult);
+}
+
+function render() {
+  const container = document.getElementById("party-slots");
+  container.innerHTML = "";
+
+  party.forEach((slot, idx) => {
+    const pData = POKEMON_DB[slot.name];
+    const hasMega = Object.keys(pData.megas).length > 0;
+    
+    let curTypes = pData.types;
+    let curBs = pData.bs;
+    if (slot.activeForm !== "通常" && pData.megas[slot.activeForm]) {
+      curTypes = pData.megas[slot.activeForm].types;
+      curBs = pData.megas[slot.activeForm].bs;
+    }
+
+    const nMults = NATURES[slot.nature] || [1,1,1,1,1,1];
+    const stats = curBs.map((b, i) => calcStat(b, slot.evs[i], i === 0, nMults[i]));
+    const evSum = slot.evs.reduce((a, b) => a + b, 0);
+
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="card-title">
+        <span>枠 ${idx + 1}: ${slot.name} ${curTypes.length ? '(' + curTypes.join('/') + ')' : ''}</span>
+        ${hasMega ? `
+          <select style="width:auto;" onchange="updateMega(${idx}, this.value)">
+            <option value="通常" ${slot.activeForm==='通常'?'selected':''}>通常</option>
+            ${Object.keys(pData.megas).map(m => `<option value="${m}" ${slot.activeForm===m?'selected':''}>${m}</option>`).join("")}
+          </select>
+        ` : ''}
+      </div>
+      
+      <div class="grid-2">
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted)">ポケモン</label>
+          <select onchange="updatePokemon(${idx}, this.value)">
+            ${Object.keys(POKEMON_DB).map(n => `<option value="${n}" ${n===slot.name?'selected':''}>${n}</option>`).join("")}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted)">性格</label>
+          <select onchange="updateNature(${idx}, this.value)">
+            ${Object.keys(NATURES).map(nat => `<option value="${nat}" ${nat===slot.nature?'selected':''}>${nat}</option>`).join("")}
+          </select>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top:6px;">
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted)">持ち物 (チャンピオンズ枠)</label>
+          <select onchange="party[${idx}].item=this.value">
+            ${CHAMPIONS_ITEMS.map(it => `<option value="${it}" ${it===slot.item?'selected':''}>${it}</option>`).join("")}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted)">特性</label>
+          <input type="text" placeholder="特性" value="${slot.ability}" onchange="slot.ability=this.value">
+        </div>
+      </div>
+
+      <div class="grid-4" style="margin-top:6px;">
+        ${slot.moves.map((m, mIdx) => `<input type="text" placeholder="技${mIdx+1}" value="${m}" onchange="party[${idx}].moves[${mIdx}]=this.value">`).join("")}
+      </div>
+
+      <table class="stat-table">
+        <tr><th>能力</th><th>HP</th><th>攻撃</th><th>防御</th><th>特攻</th><th>特防</th><th>素早</th></tr>
+        <tr><th>種族値</th>${curBs.map(b=>`<td>${b}</td>`).join("")}</tr>
+        <tr>
+          <th>能力Pt (最大32)</th>
+          ${slot.evs.map((e, eIdx)=>`<td><input type="number" min="0" max="32" value="${e}" onchange="updateEV(${idx}, ${eIdx}, this.value)"></td>`).join("")}
+        </tr>
+        <tr><th>実数値</th>${stats.map(s=>`<td class="stat-val">${s}</td>`).join("")}</tr>
+      </table>
+      <div class="ev-total ${evSum > 66 ? 'ev-over' : ''}">能力ポイント合計: ${evSum} / 66 ${evSum > 66 ? '(上限66を超えています)' : ''}</div>
+    `;
+    container.appendChild(card);
+  });
+
+  renderMatrix();
+}
+
+function updatePokemon(idx, name) { party[idx].name = name; party[idx].activeForm = "通常"; render(); }
+function updateMega(idx, form) { party[idx].activeForm = form; render(); }
+function updateNature(idx, nat) { party[idx].nature = nat; render(); }
+function updateEV(idx, statIdx, val) {
+  let v = parseInt(val) || 0;
+  if (v > 32) v = 32; // 1能力につき最大32
+  if (v < 0) v = 0;
+  party[idx].evs[statIdx] = v;
+  render();
+}
+
+function getMultiplier(atkType, defTypes) {
+  let mult = 1;
+  defTypes.forEach(def => {
+    if (TYPE_CHART[atkType] && TYPE_CHART[atkType][def] !== undefined) mult *= TYPE_CHART[atkType][def];
+  });
+  return mult;
+}
+
+function renderMatrix() {
+  const head = document.getElementById("matrix-head");
+  const body = document.getElementById("matrix-body");
+
+  head.innerHTML = "<th>攻撃タイプ</th>" + party.map((p, i) => {
+    let displayName = p.name !== "なし" ? p.name : `枠${i+1}`;
+    if (p.activeForm !== "通常") displayName = p.activeForm;
+    return `<th>${displayName}</th>`;
+  }).join("") + "<th>弱点</th><th>耐性</th>";
+
+  body.innerHTML = "";
+
+  TYPES.forEach(type => {
+    let tr = document.createElement("tr");
+    let weakCount = 0;
+    let resistCount = 0;
+    let rowHtml = `<td><b>${type}</b></td>`;
+
+    party.forEach(p => {
+      if (p.name === "なし") {
+        rowHtml += `<td>-</td>`;
+      } else {
+        const pData = POKEMON_DB[p.name];
+        let curTypes = pData.types;
+        if (p.activeForm !== "通常" && pData.megas[p.activeForm]) curTypes = pData.megas[p.activeForm].types;
+
+        const mult = getMultiplier(type, curTypes);
+        let cls = "eff-1x";
+        if (mult >= 4) { cls = "eff-4x"; weakCount++; }
+        else if (mult > 1) { cls = "eff-2x"; weakCount++; }
+        else if (mult === 0) { cls = "eff-0x"; resistCount++; }
+        else if (mult <= 0.25) { cls = "eff-025x"; resistCount++; }
+        else if (mult < 1) { cls = "eff-05x"; resistCount++; }
+
+        rowHtml += `<td class="${cls}">${mult}x</td>`;
+      }
+    });
+
+    rowHtml += `<td style="color:#fca5a5; font-weight:bold;">${weakCount}</td><td style="color:#86efac; font-weight:bold;">${resistCount}</td>`;
+    tr.innerHTML = rowHtml;
+    body.appendChild(tr);
+  });
+}
+
+render();
+</script>
+</body>
+</html>
